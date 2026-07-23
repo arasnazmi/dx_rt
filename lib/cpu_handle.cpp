@@ -12,6 +12,7 @@
 #include "dxrt/cpu_handle.h"
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <numeric>
