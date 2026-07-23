@@ -35,7 +35,7 @@ vars:
   TOOLCHAIN_DIR: '{{.TASKFILE_DIR}}/toolchains'
   TOOLCHAIN_DISTRO_BASE: 'ubuntu'
   TOOLCHAIN_DISTRO_SUITE: 'jammy'
-  TOOLCHAIN_URL: 'https://github.com/t3gemstone/toolchains/releases/latest/download/t3gemstone-toolchains-{{.TOOLCHAIN_DISTRO_BASE}}-{{.TOOLCHAIN_DISTRO_SUITE}}-edgeai.tar.gz'
+  TOOLCHAIN_URL: 'https://github.com/t3gemstone/toolchains/releases/latest/download/t3gemstone-toolchains-{{.TOOLCHAIN_DISTRO_BASE}}-{{.TOOLCHAIN_DISTRO_SUITE}}-edgeai.zip'
   BUILD_DIR: 'build_{{.ARCH}}'
   STAGE_DIR: '{{.TASKFILE_DIR}}/build_deb/dxrt'
   DEB_FILE: '{{.TASKFILE_DIR}}/dxrt_{{.VERSION}}_{{.DEB_ARCH}}.deb'
