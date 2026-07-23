@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+# Refresh the dynamic linker cache for the freshly installed libdxrt.so
+ldconfig || true
+
+# Enable and (re)start the DX-RT service when systemd is available
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable --now dxrt.service || true
+fi
+
+exit 0

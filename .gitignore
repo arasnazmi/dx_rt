@@ -1,0 +1,47 @@
+# --- Build directories ---
+/build/
+/build_*/
+build/
+
+# CMake / Ninja / compile-db artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.cmake.stamp
+compile_commands.json
+.ninja_deps
+.ninja_log
+
+# Task (go-task) cache
+/.task/
+
+# --- Packaging output ---
+/build_deb/
+/pkg_*/
+*.deb
+*.ddeb
+
+# --- Compiled output ---
+/bin/
+*.o
+*.a
+*.so
+*.so.*
+
+# --- Downloaded dependencies (fetched on demand, not versioned) ---
+# T3 Gemstone cross toolchain (task toolchain)
+/toolchains/
+# Prebuilt ONNX Runtime for aarch64
+/util/onnxruntime_aarch64/
+/util/*.tgz
+
+# --- Generated sources (produced from *.in templates) ---
+/lib/include/dxrt/gen.h
+
+# --- Editor / OS noise ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

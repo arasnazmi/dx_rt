@@ -1,0 +1,72 @@
+name: build-deb
+
+# Cross-compile dx-rt for aarch64 with the T3 Gemstone toolchain and publish
+# the resulting .deb as a GitHub release. Runs on every pushed commit.
+on:
+  push:
+    tags:
+      - 'v*'      # tag push -> build + publish release
+    branches:
+      - '**'      # any commit -> build + artifact only
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    name: Cross-compile aarch64 & package .deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build dpkg-dev build-essential curl ca-certificates
+          # go-task (Taskfile runner)
+          sudo sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+          task --version
+
+      - name: Read version
+        id: ver
+        run: |
+          VERSION="$(sed 's/^v//' release.ver)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # The extracted toolchain (~2.8 GB) is expensive to fetch every run.
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchains
+          key: t3-toolchain-ubuntu-jammy-v1
+
+      - name: Build .deb
+        run: task deb
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxrt_${{ steps.ver.outputs.version }}_arm64
+          path: dxrt_${{ steps.ver.outputs.version }}_arm64.deb
+          if-no-files-found: error
+
+      # Only publish a release when a v* tag is pushed.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: dxrt ${{ github.ref_name }}
+          artifacts: dxrt_${{ steps.ver.outputs.version }}_arm64.deb
+          allowUpdates: true
+          makeLatest: true
+          body: |
+            Cross-compiled dx-rt runtime for aarch64 (T3 Gemstone toolchain).
+            Commit: ${{ github.sha }}

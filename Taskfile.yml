@@ -1,0 +1,140 @@
+version: '3'
+
+# Cross-compile dx-rt for aarch64 with the bundled T3 Gemstone toolchain
+# (./toolchains) and package the result as a .deb.
+#
+#   task            # configure -> build -> stage -> deb
+#   task build      # only cross-compile
+#   task deb        # build the .deb package
+#   task clean      # remove build & packaging artifacts
+#
+# Override any var on the command line, e.g.:
+#   task deb USE_PYTHON=ON PREFIX=/usr/local
+
+vars:
+  ARCH: 'aarch64'
+  DEB_ARCH: 'arm64'
+  # Install prefix on the TARGET. Kept as /usr so dxrtd lands at /usr/bin/dxrtd,
+  # matching ExecStart in packaging/dxrt.service.
+  PREFIX: '/usr'
+  BUILD_TYPE: 'release'
+  VERSION:
+    sh: sed 's/^v//' release.ver
+  JOBS:
+    sh: nproc
+  # Runtime deb: ORT + service on, python binding off (install it natively on target).
+  USE_ORT: 'ON'
+  USE_SERVICE: 'ON'
+  USE_PYTHON: 'OFF'
+  USE_DXRT_TEST: 'ON'
+  USE_VNPU: 'OFF'
+  TOOLCHAIN_FILE: 'cmake/toolchain.{{.ARCH}}.cmake'
+  # T3 Gemstone cross toolchain, fetched on demand into ./toolchains.
+  # cmake/toolchain.aarch64.cmake auto-detects ./toolchains/toolchain and
+  # cross-compiles against ./toolchains/sysroot when present.
+  TOOLCHAIN_DIR: '{{.TASKFILE_DIR}}/toolchains'
+  TOOLCHAIN_DISTRO_BASE: 'ubuntu'
+  TOOLCHAIN_DISTRO_SUITE: 'jammy'
+  TOOLCHAIN_URL: 'https://github.com/t3gemstone/toolchains/releases/latest/download/t3gemstone-toolchains-{{.TOOLCHAIN_DISTRO_BASE}}-{{.TOOLCHAIN_DISTRO_SUITE}}.tar.gz'
+  BUILD_DIR: 'build_{{.ARCH}}'
+  STAGE_DIR: '{{.TASKFILE_DIR}}/build_deb/dxrt'
+  DEB_FILE: '{{.TASKFILE_DIR}}/dxrt_{{.VERSION}}_{{.DEB_ARCH}}.deb'
+
+tasks:
+
+  default:
+    desc: Cross-compile dx-rt for aarch64 and build the .deb package
+    cmds:
+      - task: deb
+
+  toolchain:
+    desc: 'Download the T3 Gemstone {{.ARCH}} toolchain into ./toolchains (skipped if present)'
+    status:
+      # Already extracted -> nothing to do (keeps local checkouts untouched).
+      - test -x {{.TOOLCHAIN_DIR}}/toolchain/bin/aarch64-none-linux-gnu-gcc
+    cmds:
+      - mkdir -p {{.TOOLCHAIN_DIR}}
+      - echo "Fetching toolchain {{.TOOLCHAIN_DISTRO_BASE}}-{{.TOOLCHAIN_DISTRO_SUITE}} ..."
+      # Stream download + extract; tarball unpacks env, sysroot/ and toolchain/
+      # directly into ./toolchains.
+      - curl -fSL --retry 3 "{{.TOOLCHAIN_URL}}" | tar xz -C {{.TOOLCHAIN_DIR}}
+
+  configure:
+    desc: 'Configure CMake for {{.ARCH}} cross-compilation (prefix {{.PREFIX}})'
+    deps: [toolchain]
+    cmds:
+      - >-
+        cmake -S {{.TASKFILE_DIR}} -B {{.BUILD_DIR}} -G Ninja
+        -DCMAKE_TOOLCHAIN_FILE={{.TOOLCHAIN_FILE}}
+        -DCMAKE_BUILD_TYPE={{.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX={{.PREFIX}}
+        -DUSE_ORT={{.USE_ORT}}
+        -DUSE_SERVICE={{.USE_SERVICE}}
+        -DUSE_PYTHON={{.USE_PYTHON}}
+        -DUSE_DXRT_TEST={{.USE_DXRT_TEST}}
+        -DUSE_VNPU={{.USE_VNPU}}
+    sources:
+      - CMakeLists.txt
+      - 'cmake/*.cmake'
+    generates:
+      - '{{.BUILD_DIR}}/build.ninja'
+
+  build:
+    desc: 'Compile the dx-rt runtime for {{.ARCH}}'
+    deps: [configure]
+    cmds:
+      - cmake --build {{.BUILD_DIR}} -j {{.JOBS}}
+    sources:
+      - 'lib/**/*'
+      - 'cli/**/*'
+      - 'examples/**/*'
+    generates:
+      - '{{.BUILD_DIR}}/lib/libdxrt.so'
+
+  stage:
+    desc: 'Install into staging tree + add systemd unit and DEBIAN metadata'
+    deps: [build]
+    cmds:
+      - rm -rf {{.STAGE_DIR}}
+      # DESTDIR install: no sudo, nothing touches the host system
+      - DESTDIR={{.STAGE_DIR}} cmake --install {{.BUILD_DIR}}
+      # keep only the real install prefix; drop stray source-bin copies
+      - find {{.STAGE_DIR}} -maxdepth 1 -mindepth 1 ! -name usr -exec rm -rf {} +
+      # systemd unit -> /lib/systemd/system/dxrt.service
+      - install -Dm644 {{.TASKFILE_DIR}}/packaging/dxrt.service {{.STAGE_DIR}}/lib/systemd/system/dxrt.service
+      # DEBIAN metadata
+      - install -Dm755 {{.TASKFILE_DIR}}/packaging/postinst {{.STAGE_DIR}}/DEBIAN/postinst
+      - install -Dm755 {{.TASKFILE_DIR}}/packaging/prerm {{.STAGE_DIR}}/DEBIAN/prerm
+      - task: gen-control
+
+  gen-control:
+    internal: true
+    vars:
+      INSTALLED_KB:
+        sh: du -sk {{.STAGE_DIR}}/usr | cut -f1
+    cmds:
+      - |
+        cat > {{.STAGE_DIR}}/DEBIAN/control <<EOF
+        Package: dxrt
+        Version: {{.VERSION}}
+        Section: libs
+        Priority: optional
+        Architecture: {{.DEB_ARCH}}
+        Maintainer: T3 <deneyapkart@turkiyeteknolojitakimi.org>
+        Installed-Size: {{.INSTALLED_KB}}
+        Description: DEEPX DX-RT runtime (cross-compiled for {{.ARCH}})
+         DX-RT runtime library, CLI tools and headers built with the
+         T3 Gemstone {{.ARCH}} toolchain. Ships the dxrt systemd service.
+        EOF
+
+  deb:
+    desc: 'Build dxrt_{{.VERSION}}_{{.DEB_ARCH}}.deb'
+    deps: [stage]
+    cmds:
+      - dpkg-deb --root-owner-group --build {{.STAGE_DIR}} {{.DEB_FILE}}
+      - 'echo "Created: {{.DEB_FILE}}"'
+
+  clean:
+    desc: Remove build and packaging artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}} {{.TASKFILE_DIR}}/build_deb {{.TASKFILE_DIR}}/*.deb
